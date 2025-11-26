@@ -1,170 +1,107 @@
-const { Router } = require("express");
+const express = require("express");
+const router = express.Router();
 const { getConnection } = require("../db/connection");
 const oracledb = require("oracledb");
 
-const router = Router();
-
-/* =====================================================
-   GET ALL MEMBERS
-   View all patrons from BK_CUSTOMERS
-===================================================== */
+/* ====================================================
+   GET ALL REGISTERED MEMBERS (vw_registered_members)
+==================================================== */
 router.get("/", async (req, res) => {
   let conn;
-
   try {
     conn = await getConnection();
 
-    const result = await conn.execute(`
-      SELECT 
-        cust_id,
-        first_name,
-        last_name,
-        email,
-        phone,
-        address,
-        city,
-        province,
-        zip,
-        join_date
-      FROM BK_CUSTOMERS
-      ORDER BY cust_id
-    `);
+    const result = await conn.execute(
+      `
+      SELECT *
+      FROM vw_registered_members
+      ORDER BY patron_id
+      `,
+      {},
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
 
-    res.json(result.rows);
+    res.json({ success: true, data: result.rows });
 
   } catch (err) {
     console.error("Error fetching members:", err);
-    res.status(500).json({ error: "Failed to fetch members" });
+    res.status(500).json({ success: false, error: "Failed to fetch members" });
   } finally {
-    if (conn) try { await conn.close(); } catch {}
+    if (conn) await conn.close();
   }
 });
 
 
-/* =====================================================
-   ADD NEW MEMBER  (CALL SP_UPSERT_CUSTOMER)
-   - This procedure both INSERTS and UPDATES
-===================================================== */
+/* ====================================================
+   REGISTER NEW MEMBER (add_patron_sp)
+==================================================== */
 router.post("/", async (req, res) => {
+  const { fname, lname, phone, email, address } = req.body;
   let conn;
 
   try {
     conn = await getConnection();
 
-    const {
-      first_name,
-      last_name,
-      email,
-      phone,
-      address,
-      city,
-      province,
-      zip
-    } = req.body;
-
-    // OUT parameter for newly generated customer ID
-    let outId = {
-      dir: oracledb.BIND_OUT,
-      type: oracledb.NUMBER
-    };
-
     await conn.execute(
       `
       BEGIN
-        SP_UPSERT_CUSTOMER(
-          NULL,     -- p_cust_id NULL → INSERT
-          :first_name,
-          :last_name,
-          :email,
-          :phone,
-          :address,
-          :city,
-          :province,
-          :zip,
-          :new_id
-        );
+        add_patron_sp(:fname, :lname, :phone, :email, :address);
       END;
       `,
-      {
-        first_name,
-        last_name,
-        email,
-        phone,
-        address,
-        city,
-        province,
-        zip,
-        new_id: outId
-      }
+      { fname, lname, phone, email, address }
     );
 
-    res.json({
-      message: "Member registered successfully!",
-      new_customer_id: outId.outBinds
-    });
+    res.json({ success: true, message: "Member registered successfully" });
 
   } catch (err) {
-    console.error("Error adding member:", err);
-    res.status(500).json({ error: "Failed to add member" });
+    console.error("Error registering member:", err);
+    res.status(500).json({ success: false, error: "Failed to register member" });
   } finally {
-    if (conn) try { await conn.close(); } catch {}
+    if (conn) await conn.close();
   }
 });
 
 
-/* =====================================================
-   UPDATE MEMBER  (CALL SP_UPSERT_CUSTOMER AGAIN)
-===================================================== */
+/* ====================================================
+   UPDATE MEMBER INFO (sp_update_member)
+==================================================== */
 router.put("/:id", async (req, res) => {
+  const { fname, lname, phone, email, address } = req.body;
   let conn;
 
   try {
     conn = await getConnection();
 
-    const cust_id = Number(req.params.id);
-    const { address, phone, email } = req.body;
-
-    let outId = {
-      dir: oracledb.BIND_OUT,
-      type: oracledb.NUMBER
-    };
-
     await conn.execute(
       `
       BEGIN
-        SP_UPSERT_CUSTOMER(
-          :cust_id,
-          NULL,
-          NULL,
-          :email,
-          :phone,
-          :address,
-          NULL,
-          NULL,
-          NULL,
-          :updated_id
+        sp_update_member(
+          p_patron_id => :id,
+          p_fname     => :fname,
+          p_lname     => :lname,
+          p_phone     => :phone,
+          p_email     => :email,
+          p_address   => :address
         );
       END;
       `,
       {
-        cust_id,
-        email,
+        id: req.params.id,
+        fname,
+        lname,
         phone,
-        address,
-        updated_id: outId
+        email,
+        address
       }
     );
 
-    res.json({
-      message: "Member updated successfully!",
-      updated_id: outId.outBinds
-    });
+    res.json({ success: true, message: "Member updated successfully" });
 
   } catch (err) {
     console.error("Error updating member:", err);
-    res.status(500).json({ error: "Failed to update member" });
+    res.status(500).json({ success: false, error: "Failed to update member" });
   } finally {
-    if (conn) try { await conn.close(); } catch {}
+    if (conn) await conn.close();
   }
 });
 
