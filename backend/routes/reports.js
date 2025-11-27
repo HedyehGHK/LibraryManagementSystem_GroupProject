@@ -131,7 +131,7 @@ router.get("/top5", async (req, res) => {
 
 /* ============================================================
    MOST BORROWED BOOKS  
-   Uses VIEW: lms_most_borrowed_books
+   Uses VIEW: VW_MOST_BORROWED_BOOKS
 ============================================================ */
 router.get("/most-borrowed", async (req, res) => {
   let conn;
