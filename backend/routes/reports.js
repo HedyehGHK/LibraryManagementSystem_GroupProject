@@ -3,7 +3,6 @@ const router = express.Router();
 const oracledb = require("oracledb");
 const { getConnection } = require("../db/connection");
 
-
 router.get("/", (req, res) => {
   res.json({
     success: true,
@@ -140,7 +139,7 @@ router.get("/most-borrowed", async (req, res) => {
     conn = await getConnection();
 
     const result = await conn.execute(
-      `SELECT * FROM lms_most_borrowed_books ORDER BY times_borrowed DESC`,
+      `SELECT * FROM VW_MOST_BORROWED_BOOKS ORDER BY times_borrowed DESC`,
       [],
       { outFormat: oracledb.OUT_FORMAT_OBJECT },
     );
@@ -148,9 +147,10 @@ router.get("/most-borrowed", async (req, res) => {
     res.json({ success: true, data: result.rows });
   } catch (err) {
     console.error("Error fetching most borrowed:", err);
-    res
-      .status(500)
-      .json({ success: false, error: "Failed to fetch most borrowed books" });
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch most borrowed books",
+    });
   } finally {
     if (conn) await conn.close();
   }
@@ -206,7 +206,7 @@ router.put("/pay-fine/:loan_id", async (req, res) => {
       END;
       `,
       { loan_id },
-      { autoCommit: true }
+      { autoCommit: true },
     );
 
     res.json({ success: true, message: "Fine marked as PAID" });
