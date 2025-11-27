@@ -1,76 +1,222 @@
-const { Router } = require("express");
-const { getConnection } = require("../db/connection");
+const express = require("express");
+const router = express.Router();
 const oracledb = require("oracledb");
+const { getConnection } = require("../db/connection");
 
-const router = Router();
+
+router.get("/", (req, res) => {
+  res.json({
+    success: true,
+    message: "Reports API is running",
+    available_routes: [
+      "/api/reports/overdue",
+      "/api/reports/unpaid-fines",
+      "/api/reports/top5",
+      "/api/reports/most-borrowed/:year",
+      "/api/reports/book-copy-status/:book_id",
+    ],
+  });
+});
 
 /* ============================================================
-   GET /api/reports/most-borrowed/:year
-   Calls procedure SP_MOST_BORROWED_BY_YEAR(p_year)
-   and returns the result as JSON
-   ------------------------------------------------------------
-   Required: p_year (NUMBER)
-   ============================================================ */
-router.get("/most-borrowed/:year", async (req, res) => {
+   OVERDUE BOOKS REPORT  
+   Uses VIEW: vw_overdue_books
+============================================================ */
+router.get("/overdue", async (req, res) => {
   let conn;
-
-  const year = Number(req.params.year);
-
-  if (isNaN(year)) {
-    return res.status(400).json({ error: "Year must be a number" });
-  }
-
   try {
     conn = await getConnection();
 
-    /* 
-       We will use DBMS_OUTPUT to capture what the stored
-       procedure prints, then return it as JSON to frontend.
-    */
-
-    // Enable DBMS_OUTPUT buffer
-    await conn.execute(`BEGIN DBMS_OUTPUT.ENABLE(NULL); END;`);
-
-    // Call stored procedure
-    await conn.execute(
-      `BEGIN SP_MOST_BORROWED_BY_YEAR(:yr); END;`,
-      { yr: year }
+    const result = await conn.execute(
+      `
+      SELECT *
+      FROM vw_overdue_books
+      ORDER BY overdue_days DESC
+      `,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT },
     );
 
-    // Read DBMS_OUTPUT content
-    let outputLines = [];
-    let done = false;
-
-    while (!done) {
-      const result = await conn.execute(
-        `BEGIN DBMS_OUTPUT.GET_LINE(:line, :status); END;`,
-        {
-          line: { type: oracledb.STRING, dir: oracledb.BIND_OUT },
-          status: { type: oracledb.NUMBER, dir: oracledb.BIND_OUT }
-        }
-      );
-
-      if (result.outBinds.status !== 0) {
-        done = true; 
-      } else {
-        outputLines.push(result.outBinds.line);
-      }
-    }
-
-    res.json({
-      year,
-      message: "Report generated successfully",
-      result: outputLines
-    });
-
+    res.json({ success: true, data: result.rows });
   } catch (err) {
-    console.error("Error running report:", err);
-    res.status(500).json({ error: "Failed to run report" });
-
+    console.error("Error fetching overdue books:", err);
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to fetch overdue books" });
   } finally {
-    if (conn) {
-      try { await conn.close(); } catch {}
-    }
+    if (conn) await conn.close();
+  }
+});
+
+/* ============================================================
+   OVERDUE LOANS WITH FINES  
+   Uses VIEW: v_overdue_loans_with_fines
+============================================================ */
+router.get("/overdue-with-fines", async (req, res) => {
+  let conn;
+  try {
+    conn = await getConnection();
+
+    const result = await conn.execute(
+      `SELECT * FROM v_overdue_loans_with_fines`,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT },
+    );
+
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error("Error fetching overdue/fines:", err);
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to fetch overdue fines" });
+  } finally {
+    if (conn) await conn.close();
+  }
+});
+
+/* ============================================================
+   UNPAID FINES ONLY  
+   Uses VIEW: v_overdue_loans_with_fines
+============================================================ */
+router.get("/unpaid-fines", async (req, res) => {
+  let conn;
+  try {
+    conn = await getConnection();
+
+    const result = await conn.execute(
+      `
+      SELECT *
+      FROM v_overdue_loans_with_fines
+      WHERE paid_flag = 'N'
+      `,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT },
+    );
+
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error("Error fetching unpaid fines:", err);
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to fetch unpaid fines" });
+  } finally {
+    if (conn) await conn.close();
+  }
+});
+
+/* ============================================================
+   TOP 5 MOST LOANED  
+   Uses VIEW: lms_top5_most_loaned_books
+============================================================ */
+router.get("/top5", async (req, res) => {
+  let conn;
+  try {
+    conn = await getConnection();
+
+    const result = await conn.execute(
+      `SELECT * FROM lms_top5_most_loaned_books`,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT },
+    );
+
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error("Error fetching top5:", err);
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to fetch top5 books" });
+  } finally {
+    if (conn) await conn.close();
+  }
+});
+
+/* ============================================================
+   MOST BORROWED BOOKS  
+   Uses VIEW: lms_most_borrowed_books
+============================================================ */
+router.get("/most-borrowed", async (req, res) => {
+  let conn;
+  try {
+    conn = await getConnection();
+
+    const result = await conn.execute(
+      `SELECT * FROM lms_most_borrowed_books ORDER BY times_borrowed DESC`,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT },
+    );
+
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error("Error fetching most borrowed:", err);
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to fetch most borrowed books" });
+  } finally {
+    if (conn) await conn.close();
+  }
+});
+
+/* ============================================================
+   BOOK COPY STATUS  
+   Uses VIEW: v_book_copy_status
+============================================================ */
+router.get("/book-copy-status/:book_id", async (req, res) => {
+  const book_id = req.params.book_id;
+
+  let conn;
+  try {
+    conn = await getConnection();
+
+    const result = await conn.execute(
+      `
+      SELECT *
+      FROM v_book_copy_status
+      WHERE book_id = :book_id
+      `,
+      { book_id },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT },
+    );
+
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error("Error fetching copy status:", err);
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to fetch copy status" });
+  } finally {
+    if (conn) await conn.close();
+  }
+});
+
+/* ============================================================
+   PAY A FINE  
+   Uses PROCEDURE: sp_pay_fine
+============================================================ */
+router.put("/pay-fine/:loan_id", async (req, res) => {
+  const loan_id = req.params.loan_id;
+
+  let conn;
+  try {
+    conn = await getConnection();
+
+    await conn.execute(
+      `
+      BEGIN
+        sp_pay_fine(:loan_id);
+      END;
+      `,
+      { loan_id },
+      { autoCommit: true }
+    );
+
+    res.json({ success: true, message: "Fine marked as PAID" });
+  } catch (err) {
+    console.error("Error paying fine:", err);
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to update fine status" });
+  } finally {
+    if (conn) await conn.close();
   }
 });
 
